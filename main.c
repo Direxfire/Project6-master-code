@@ -73,7 +73,24 @@ int Test_Slave_Address = 0x048;
 */
 
 /* this section is the configuration of the Real Time Clock
- */
+*/
+
+//Functions for the RTC
+void Set_Time(void);
+void Read_Time(void);
+
+
+//Constants for the RTC
+#define Starting_Seconds 0x00
+#define Starting_Minutes 0x00
+#define Starting_Hours   0x00
+#define Starting_Day     0x01 //This is 1-7 for the days of the week
+#define Starting_Data    0x01
+#define Starting_Year    0x17 //This is 23 in hex
+
+//Data management for the RTC
+char Set_Time[] = {0x00, Starting_Seconds, Starting_Minutes, Starting_Hours, Starting_Day, Starting_Data, Starting_Year}; //This will be removed later this is the start time for the RTC
+char *Set_Time_ptr = Set_Time;
 
 // Functions for the RTC
 void Setup_TimerB_RTC(void);
@@ -275,9 +292,17 @@ int main(void)
 		5. Add additional I2C Slave communication as needed.
 	*/
 
-	// Test function to send the initial RTC setup values.......
-	void Set_Time(char *RTC_Message); // Yeah this literally just calls the Send_I2C_Message function now...
+	//Test function to send the intitial RTC setup values.......
+	void Set_Time(void); //Yeah this litterally just calls the Send_I2C_Message function now...
 	unsigned Delay;
+	while(1){
+		//Hold the device here indefinately.
+		void Set_Time(void);
+		for(Delay = 20000; Delay >= 0; Delay--){
+			//Delay the system before resending the Set_Time message
+		}
+	}
+
 
 	Set_Time(Set_Time_ptr);
 	while (1)
@@ -645,8 +670,9 @@ Interrupt Service Routines
 
 // I2C Transmit intterupt vector
 // Used to send data out the master
-// TODO UPDATE CODE TO RECIEVE DATA FROM RTC AND TEMP_SENSOR
+//TODO UPDATE CODE TO RECIEVE DATA FROM RTC AND TEMP_SENSOR
 
+/* OLD I2C Interrupt Service Routine
 #pragma vector = EUSCI_B1_VECTOR
 __interrupt void EUSCI_B1_I2C_ISR(void)
 {
@@ -673,6 +699,65 @@ __interrupt void EUSCI_B1_I2C_ISR(void)
 		break;
 	}
 }
+
+*/
+
+//New Interrupt Service Routine
+//Updated to allow for sending the RTC setup function although that could be changed to just use the Send_I2C_Message funciton ¯\_(ツ)_/¯
+#pragma vector = EUSCI_B1_VECTOR
+__interrupt void EUSCI_B1_I2C_ISR(void){
+
+    switch(UCB1IV){				//Read in data
+     case 0x16:                 //ID 16: RXIFG0 -->Recieve, used for both temperature and RTC.
+                                //Expecting 7 bytes of data from the RTC
+                                //Expecting 1 byte from the LM92
+         for(temp_pos = 0; temp_pos < Data_In; temp_pos++){
+        // Data_In[temp_pos] = UCB1RXBUF;   // receive data
+        //Need to do some conversions here to move the imported data into the struct. Using an array I think is the best option
+            Current_Time_BCD[j] = UCB1RXBUF;    //Read into the BCD array for temporary storage
+         int j;
+         for (j = 0; j < 500; ++j) {
+            //delay
+        }
+         }
+         break;
+    //This whole case needs to be updated for the transmission with variable buffer size and etc.
+     case 0x18:                 // ID 18: TXIFG0 --> Transmit
+	 //This if statement is probably redundant and can be removed and optomized but ¯\_(ツ)_/¯
+         if(first_Set_Time == 1 && I2C_Message_Counter <= 6){		//Send the setup time to the RTC
+                 UCB1TBCNT = 6;  //# of bytes in Set_Time
+
+                 UCB1TXBUF = Set_Time[I2C_Message_Counter];
+
+                 if(I2C_Message_Counter == 5){
+                     First_Set_Time = 0;
+                 }
+                 else{
+                     I2C_Message_Counter++;
+                 }
+		else if (first_Set_Time != 1)				//Write out to the slave from Send_I2C_Message
+		{
+				//Count set in Send_I2C_Message function
+				//Now just increase I2C_Message_Global
+				UCB1TXBUF = I2C_Message_Global[I2C_Message_Counter]; // Send the next byte in the I2C_Message_Global string
+				I2C_Message_Counter++;								 // Increase the message position counter
+
+
+		}
+
+         }
+         else{
+                UCB1TXBUF = 0x03;      //send register address to start
+         }
+         break;
+     default:
+         break;
+    }
+}
+
+
+
+
 
 // Keypad interrupt vector
 #pragma vector = PORT1_VECTOR

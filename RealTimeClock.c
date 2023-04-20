@@ -73,6 +73,3 @@ void Read_Time(void){
     while((UCB1IFG & UCSTPIFG) == 0);                       //wait for stop flag
         UCB1IFG &= ~UCSTPIFG;                               // clear flag
 }
-
-
-
