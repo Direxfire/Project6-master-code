@@ -198,6 +198,7 @@ char *Unlocked_ASCII_ptr = Unlocked_ASCII;
 */
 int Unlocked_Input;
 char Mode_Select;
+char Mode_Select_Char = 'D';
 int Key_In = 0;
 int Device_Online = 1;
 /*
@@ -210,6 +211,7 @@ float Read_Plant_Temperature(void);
 void Peltier_PID(float, float);
 
 int Peltier_On = 0;
+char Peltier_On_Char[3];
 
 // Here be stuff for the PID
 int Data_Valid;
@@ -440,7 +442,17 @@ int main(void)
 			//Send UART Message something like "Device Off."
 			break;
 		default:
+	        //Set sample size if we pressed a number
+	        if (Mode_Select > '0' && Mode_Select < ':')
+		    {
+		        Sample_Size = Mode_Select;
+		    }
 			break;
+		}
+		// Set the mode indicator if it's A through D
+		if (Mode_Select > '@' && Mode_Select < 'E')
+		{
+		    Mode_Select_Char = Mode_Select;
 		}
 
 		if (Fresh_Data == 1)
@@ -476,10 +488,25 @@ int main(void)
 				Send_UART_Message(47);
 				for (i = 0; i < 10000; i++)
 					;
-				//Following message format: Ambient temperature 0, Ambient temperature 1, Ambient temperature 2, Peltier Temperature 0, Peltier Temperature 1, Peltier Temperature 0, Hours, Minutes, Seconds
+				
+			    //Brute force converting the seconds counter to char
+				sprintf(Peltier_On_Char, "%d", Peltier_On);
+				if (Peltier_On < 100)
+				{
+				    Peltier_On_Char[2] = Peltier_On_Char[1];
+				    Peltier_On_Char[1] = Peltier_On_Char[0];
+				    Peltier_On_Char[0] = '0';
+				}
+				if(Peltier_On < 10)
+				{
+				   Peltier_On_Char[2] = Peltier_On_Char[1];
+				   Peltier_On_Char[1] = '0';
+				}
+				//Following message format: Sample size, Ambient temperature 0, Ambient temperature 1, Ambient temperature 2, Mode Select, Peltier on counter(3 digits), Peltier Temperature 0, Peltier Temperature 1, Peltier Temperature 2
 				//To account for decimal rollover the system sends 18 bytes? I think this will work??
-				snprintf(I2C_Message_Global,100, "%c%c%c%c%c%c%c%c%c",Current_Temperature_ASCII[0], Current_Temperature_ASCII[1], Current_Temperature_ASCII[2], Rolling_Average_ASCII[0], Rolling_Average_ASCII[1], Rolling_Average_ASCII[3], Hours_ASCII, Minutes_ASCII, Seconds_ASCII);
-		        Send_I2C_Message(LCD, I2C_Message_Global_ptr, 18);
+				//Not sure, so I'm just sending 13 bytes
+				snprintf(I2C_Message_Global,100, "%c%c%c.%c%c%s%c%c.%c",Sample_Size + '0', Rolling_Average_ASCII[0], Rolling_Average_ASCII[1], Rolling_Average_ASCII[2], Mode_Select_Char, Peltier_On_Char, Current_Temperature_ASCII[0], Current_Temperature_ASCII[1], Current_Temperature_ASCII[2]);
+		        Send_I2C_Message(LCD, I2C_Message_Global_ptr, 13);
 
 			}
 			else
