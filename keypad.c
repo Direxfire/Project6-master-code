@@ -25,7 +25,7 @@ void Setup_Keypad_Ports(void){
     P1OUT &= ~0xFF;      //Set Pull Down resistor
     P1IES &= ~0xFF;      //Set interrupt sensativity to L-to-H
     P1IFG &= ~0xFF;      //Clear any P1IFG on P1.0->P1.3
-
+    P1IE |= ~0xFF;
     //Setup P2.0->P2.3 as inputs
 
     P2DIR |= 0xFF;       //Set P2 direction =  out

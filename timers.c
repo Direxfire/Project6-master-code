@@ -19,10 +19,24 @@ void Setup_TimerB0_A2D(void){
    TB0CTL |= MC__STOP;                      //Put timer into stop mode, change after sample size collected
    TB0CTL |= ID__8;
    TB0EX0 |= TBIDEX__4;
-   TB0CCR0 = 10944;                       //Set CCR0 to the value put into this function
+   TB0CCR0 = 10944;                         //Set CCR0 to the value put into this function
 
    TB0CCTL0 |= CCIE;                        //Enable CCR0 interrupt
    TB0CCTL0 &= ~CCIFG;                      //Clear interrupt flag
+
+}
+
+void Setup_TimerB_RTC(void){
+    /*
+    Configure the timer to trigger every one second to get the time from the RTC
+    */
+   TB1CTL |= TBCLR;
+   TB1CTL |= TBSSEL__ACLK;
+   TB1CTL |= MC__STOP;
+   TB1CCR0 |= 32768;
+
+   TB1CCTL0 |= CCIE;
+   TB1CCTL0 &= ~CCIFG;
 
 }
 

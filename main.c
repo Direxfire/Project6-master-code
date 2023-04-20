@@ -4,19 +4,19 @@
 #include <stdio.h>
 #include <stdlib.h>
 
-
 #define third_second_timer_period 333333
 
-#define LCD 0x048
+#define LCD 0x038
 #define LED 0x058
 #define RTC 0x068
+#define LM92 0x048
 #define Temp_Sensor 0x012
-#define LM19_PIN BIT0	//Connected on pin 5.0
+#define LM19_PIN BIT0 // Connected on pin 5.0
 
 #define Test_LED BIT6
 
 #define max_I2C_Length 32
-#define max_UART_Length 64
+#define max_UART_Length 128
 
 void Setup_I2C_Module(void);
 void Send_I2C_Message(int, char *, int);
@@ -24,14 +24,24 @@ void Setup_Keypad_Ports(void);
 char Decode_Input(int);
 
 // Global Variables needed for I2C communication
-int I2C_Message_Counter = 0; // Index value to count the position in the message being written out I2C
+int I2C_Message_Counter = 0;			 // Index value to count the position in the message being written out I2C
 char I2C_Message_Global[max_I2C_Length]; // Create an empty "string" to hold the final message as it is being sent out I2C
-int Data_In; 				//Used to count how long the input should be for the RTC or the LM92
-int temp_pos;				//Counter for the inputs
+int I2C_Message_In_Counter = 0;
+int Data_In[7] = {0, 0, 0, 0, 0, 0, 0};
+int Read_In_Length = 6;
 
+char I2C_Message_Global_Receive[max_I2C_Length];
+
+// int Data_In; 				//Used to count how long the input should be for the RTC or the LM92
+int temp_pos; // Counter for the inputs
+
+// Create Read SLave Address:
+int Read_Slave_Address;
 // UART Function Prototypes
 void Setup_UART(void);
 void Send_UART_Message(int Size_UART_Message);
+
+char spin[] = {"|/-\\"};
 
 /*
 //UART test variables below
@@ -63,22 +73,37 @@ int Test_Slave_Address = 0x048;
 */
 
 /* this section is the configuration of the Real Time Clock
-*/
-#define Starting_Seconds 0x00
-#define Starting_Minutes 0x00
-#define Starting_Hours   0x00
-#define Starting_Day     0x01 //This is 1-7 for the days of the week
-#define Starting_Data    0x01 
-#define Starting_Year    0x17 //This is 23 in hex
-char Set_Time[] = {0x00, Starting_Seconds, Starting_Minutes, Starting_Hours, Starting_Day, Starting_Data, Starting_Year}; //This will be removed later this is the start time for the RTC
-char *Set_Time_ptr = Set_Time;
+ */
 
+// Functions for the RTC
+void Setup_TimerB_RTC(void);
+void Set_Time(char *RTC_Message);
+void Read_Time(void);
+
+// Constants for the RTC
+#define Starting_Seconds 0x00
+#define Starting_Minutes 0x32
+#define Starting_Hours 0x06
+#define Starting_Day 0x01 // This is 1-7 for the days of the week
+#define Starting_Date 0x17
+#define Starting_Month 0x04
+#define Starting_Year 0x23
+
+// Data management for the RTC
+char Set_Time_Arr[] = {0x00, Starting_Seconds, Starting_Minutes, Starting_Hours, Starting_Day, Starting_Date, Starting_Month, Starting_Year}; // This will be removed later this is the start time for the RTC
+char *Set_Time_ptr = Set_Time_Arr;
+char I2C_Message_Global[max_I2C_Length]; // Create an empty "string" to hold the final message as it is being sent out I2C
+
+int Read_Time_True = 0;
+
+int Get_Time = 0;
 /*
 RTC Struct and variables
 */
 
 /*
 Creating a struct to hold the data read in from the RTC
+Below is basically the "data base" that holds the current time values.
 */
 
 struct Time
@@ -88,11 +113,11 @@ struct Time
 	int hours;
 	int day;
 	int date;
-    int month;
-    int year;
+	int month;
+	int year;
 };
 
-struct Current_Time time;
+struct Time Current_Time;
 
 #define Seconds Current_Time.seconds
 #define Minutes Current_Time.minutes
@@ -102,11 +127,14 @@ struct Current_Time time;
 #define Month Current_Time.month
 #define Year Current_Time.year
 
-int Current_Time_BCD[6] ={Seconds, Minutes, Hours, Day, Date, Month, Year};	//Create an array which contains structs
+int Current_Time_BCD[7]; // Create an array which contains structs
 //^This allows for the indexing of the Current_Time struct with an integer
 
+int First_Set_Time = 0;
 
-//End RTC
+void bcd_decimal(void);
+
+// End RTC
 
 /*
 This section is the struct system for storing all the temperature values.
@@ -136,17 +164,17 @@ float Real_Analog_Value;
 int Sample_Size = 0;
 int Rolling_Average_Unlocked = 0;
 int Raw_Temp = 0;
-
+int Fresh_Data;
 // End A2D variables.
 // Keypad/Locked code globals
 /*
 int Passcode_Inputs[5] = {0, 0, 0, 0, 0}; // Three digit passcode, the last value holds the locked state
 int Input_Counter = 0;
-int Temp_In[2] = {0, 0};
 int Status = 1;
 char Input_Arr[3] = {0, 0, 0};
-int New_Input = 0;
 */
+int New_Input = 0;
+int Temp_In[2] = {0, 0};
 
 // Keypad functions prototypes
 
@@ -157,17 +185,39 @@ int Locked_Status(void);
 int Unlocked_Status(void);
 
 // Program flow globals
-//This is depreciated and needs revised.
+// This is depreciated and needs revised.
+/*
 char Locked_Code[1];
 char *Locked_Code_ptr = Locked_Code;
 char Unlocked_ASCII[1];
 char *Unlocked_ASCII_ptr = Unlocked_ASCII;
-
+*/
 int Unlocked_Input;
-
-
-
+char Mode_Select;
+int Key_In = 0;
 /*
+
+Peltier Controls Section
+*/
+
+void Setup_PID_Ports(void);
+float Read_Plant_Temperature(void);
+void Peltier_PID(float, float);
+
+int Peltier_On = 0;
+
+// Here be stuff for the PID
+int Data_Valid;
+float Derivative;
+float Integral;
+float Previous_Error;
+float Previous_Temperature;
+float MIN_OUTPUT = 1.0;
+float Current_Temperature;
+
+char Current_Temperature_ASCII[3];
+/*
+
 Final revision for the Project 4 code
 The goal of this was to create a completely stable version with the I2C bug fixed
 Additionally, all functionality will be put into function to allow for a modular design
@@ -179,12 +229,11 @@ Written 03/27/23 Last Revision 03/27/23 by Drew.
 int main(void)
 {
 	WDTCTL = WDTPW | WDTHOLD; // stop watchdog timer
-	/*
+
 	// Using some simple IO to debug
 	P6DIR |= BIT6;
 	P6OUT &= ~BIT6;
-	*/
-	Set_RTC();
+	P1IE |= 0xFF;
 
 	// Need to create a simple I2C transmission protocol
 
@@ -195,7 +244,8 @@ int main(void)
 	// Setup A2D and Timers
 	Setup_A2D();
 	Setup_TimerB0_A2D();
-
+	Setup_TimerB_RTC();
+	Setup_PID_Ports();
 	// Setup UART
 	Setup_UART();
 	// After setup don't forget to enable GPIO....
@@ -207,9 +257,9 @@ int main(void)
 	2. Begin collecting temperature data from the LN19 analog temp sensor every .5s
 	3. Begin collecting temperature data from the LM92 I2C temp sensor          .5s
 	4. Get time from the RTC every 												 1s
-		-Note the timing on all of these functions is incredibly tight and the system 
-			must be written very effeciently. 
-	5. Create the logic for temperature matching when 'C' is selected. 
+		-Note the timing on all of these functions is incredibly tight and the system
+			must be written very effeciently.
+	5. Create the logic for temperature matching when 'C' is selected.
 		-This will not be PID.
 		-Collecting data from the peltier and analog sensor, the system will check if the value is
 			greater than or less than ambient then make the decision to heat or cool.
@@ -222,10 +272,224 @@ int main(void)
 		2. Reading RTC values and converting to ASCII
 		3. Reading LM92 Temperature data
 		4. Feedback controls
-		5. Add additional I2C Slave communication as needed. 
+		5. Add additional I2C Slave communication as needed.
 	*/
 
+	// Test function to send the initial RTC setup values.......
+	void Set_Time(char *RTC_Message); // Yeah this literally just calls the Send_I2C_Message function now...
+	unsigned Delay;
 
+	Set_Time(Set_Time_ptr);
+	while (1)
+	{
+		int i;
+
+		snprintf(UART_Message_Global, 100, "System Starting \e[?25l");
+		Send_UART_Message(21);
+		for (i = 0; i < 20000; i++)
+		{
+		}
+
+		snprintf(UART_Message_Global, 100, "|");
+		Send_UART_Message(1);
+		for (i = 0; i < 20000; i++)
+		{
+		}
+		for (i = 0; i < 20000; i++)
+		{
+		}
+		for (i = 0; i < 20000; i++)
+		{
+		}
+		for (i = 0; i < 20000; i++)
+		{
+		}
+		for (i = 0; i < 20000; i++)
+		{
+		}
+		for (i = 0; i < 20000; i++)
+		{
+		}
+		snprintf(UART_Message_Global, 100, "\b/");
+		Send_UART_Message(2);
+		for (i = 0; i < 20000; i++)
+		{
+		}
+		for (i = 0; i < 20000; i++)
+		{
+		}
+		for (i = 0; i < 20000; i++)
+		{
+		}
+		for (i = 0; i < 20000; i++)
+		{
+		}
+		for (i = 0; i < 20000; i++)
+		{
+		}
+		for (i = 0; i < 20000; i++)
+		{
+		}
+		snprintf(UART_Message_Global, 100, "\b-");
+		Send_UART_Message(2);
+		for (i = 0; i < 20000; i++)
+		{
+		}
+		for (i = 0; i < 20000; i++)
+		{
+		}
+		for (i = 0; i < 20000; i++)
+		{
+		}
+
+		for (i = 0; i < 20000; i++)
+		{
+		}
+		for (i = 0; i < 20000; i++)
+		{
+		}
+		for (i = 0; i < 20000; i++)
+		{
+		}
+		snprintf(UART_Message_Global, 100, "\b\\");
+		Send_UART_Message(2);
+		for (i = 0; i < 20000; i++)
+		{
+		}
+		for (i = 0; i < 20000; i++)
+		{
+		}
+		for (i = 0; i < 20000; i++)
+		{
+		}
+
+		for (i = 0; i < 20000; i++)
+		{
+		}
+		for (i = 0; i < 20000; i++)
+		{
+		}
+		for (i = 0; i < 20000; i++)
+		{
+		}
+
+		snprintf(UART_Message_Global, 100, "\b \n\r");
+		Send_UART_Message(4);
+
+		// Turn timer on...
+		TB0CTL |= MC__UP; // Put timer for A2D into up mode.
+		TB1CTL |= MC__UP;
+		Sample_Size = 8;
+
+		// Hold the device here indefineatly.
+		// Send I2C Message to the RTC to set the time
+		// P6OUT ^= BIT6;
+		// Read_Time();
+
+		// Now convert to decimal from BCD
+		// bcd_decimal();
+		// Now convert from decimal to ASCII
+
+		// snprintf(UART_Message_Global, 100, "The Time is now: [20%d-%d-%dT%d:%d:%d]\n\r", Year, Month, Date, Hours, Minutes, Seconds);
+		// Send_UART_Message(38);
+
+
+		while(1){
+	        if (New_Input == 1)
+	        {
+	            // Call char decoder here
+	            Mode_Select = Decode_Input(Key_In);
+	            New_Input = 0;
+	        }
+		switch(Mode_Select){
+			case 'A':
+					// Heat the device
+					P5DIR &= ~BIT2; // Set led dir out Cool
+				P5DIR |= BIT3;		// Set led dir out Heat
+				break;
+			case 'B':
+					// Cool the device
+					P5DIR &= ~BIT3; // Set led dir out Heat
+				P5DIR |= BIT2;		// Set led dir out Cool
+				break;
+			case 'C':
+					// Match ambient
+					Peltier_PID(Current_Temperature, 0);
+					break;
+			case 'D':
+					// Turn off device
+					P5DIR &= ~BIT3;
+				P5DIR &= ~BIT2;
+				break;
+			default:
+			    break;
+			}
+
+			if (Fresh_Data == 1)
+			{
+				Fresh_Data = 0;
+				Process_Temperature_Data(Raw_Temp);
+			}
+			if (Get_Time == 1)
+			{
+				Get_Time = 0;
+				Read_Time();
+				bcd_decimal();
+				if (Rolling_Average_Unlocked == 1)
+				{
+					Current_Temperature = Read_Plant_Temperature();
+					for (i = 0; i < 2000; i++)
+						;
+
+					// Note these time stamps follow the ISO 8601 standard format of UTC time then + or - the hours to the current time zone. For mountain time this is 6.
+					snprintf(UART_Message_Global, 100, "The current temperature is: %c%c.%c%cC. ", Rolling_Average_ASCII[0], Rolling_Average_ASCII[1], Rolling_Average_ASCII[2], 176);
+					Send_UART_Message(36);
+					for (i = 0; i < 10000; i++)
+						;
+					snprintf(UART_Message_Global, 100, "The Peltier Temperature is: %c%c.%c%cC.", Current_Temperature_ASCII[0], Current_Temperature_ASCII[1], Current_Temperature_ASCII[2], 176);
+					Send_UART_Message(35);
+					for (i = 0; i < 10000; i++)
+						;
+					snprintf(UART_Message_Global, 100, "The current time is:[20%d-%d-%dT%d:%d:%d-06:00]\r", Year, Month, Date, Hours, Minutes, Seconds);
+					Send_UART_Message(47);
+					for (i = 0; i < 10000; i++)
+						;
+				}
+				else
+				{
+					snprintf(UART_Message_Global, 100, "The current time is:[20%d-%d-%dT%d:%d:%d-06:00]\r", Year, Month, Date, Hours, Minutes, Seconds);
+					Send_UART_Message(72);
+				}
+			}
+
+			if (Peltier_On >= 300)
+			{
+				Peltier_On = 0;		// Reset Peltier Device counter
+				TB0CTL |= MC__STOP; // Disable timers
+				TB1CTL |= MC__STOP;
+				snprintf(UART_Message_Global, 100, "\e[?25h");
+				Send_UART_Message(5);
+				snprintf(UART_Message_Global, 100, "System Turning Off.\n\r");
+				Send_UART_Message(21);
+				for (i = 0; i < 10000; i++)
+				{
+				}
+				// snprintf(UART_Message_Global, 100, "System Restarting...\n\r");
+				// Send_UART_Message(21);
+			}
+		}
+	}
+}
+
+void bcd_decimal(void)
+{
+	Seconds = ((Current_Time_BCD[0] & 0xF0) >> 4) * 10 + (Current_Time_BCD[0] & 0x0F);
+	Minutes = ((Current_Time_BCD[1] & 0xF0) >> 4) * 10 + (Current_Time_BCD[1] & 0x0F);
+	Hours = ((Current_Time_BCD[2] & 0xF0) >> 4) * 10 + (Current_Time_BCD[2] & 0x0F);
+	Day = ((Current_Time_BCD[3] & 0xF0) >> 4) * 10 + (Current_Time_BCD[3] & 0x0F);
+	Date = ((Current_Time_BCD[4] & 0xF0) >> 4) * 10 + (Current_Time_BCD[4] & 0x0F);
+	Month = ((Current_Time_BCD[5] & 0xF0) >> 4) * 10 + (Current_Time_BCD[5] & 0x0F);
+	Year = ((Current_Time_BCD[6] & 0xF0) >> 4) * 10 + (Current_Time_BCD[6] & 0x0F);
 }
 
 /* reverse:  reverse string s in place */
@@ -295,12 +559,12 @@ void Process_Temperature_Data(int New_Temp_Value)
 	{
 		Rolling_Average_Unlocked = 1;
 	}
-    //snprintf(UART_Message_Global, 100, "Current temperature Celsius temperature is: %c%c.%c. \n\r", Temperature_Array[Sample_Number].Upper_Bit[0], Temperature_Array[Sample_Number].Upper_Bit[1], Temperature_Array[Sample_Number].Lower_Bit);
-    //Send_UART_Message(40);
+	// snprintf(UART_Message_Global, 100, "Current temperature Celsius temperature is: %c%c.%c. \n\r", Temperature_Array[Sample_Number].Upper_Bit[0], Temperature_Array[Sample_Number].Upper_Bit[1], Temperature_Array[Sample_Number].Lower_Bit);
+	// Send_UART_Message(40);
 	if (Rolling_Average_Unlocked == 1)
 	{
 		// TODO add average here.... DONE??
-	    TB0CTL |= MC__STOP;                      //Put timer into stop mode, change after sample size collected
+		TB0CTL |= MC__STOP; // Put timer into stop mode, change after sample size collected
 
 		int i;
 		Rolling_Average = 0;
@@ -318,15 +582,26 @@ void Process_Temperature_Data(int New_Temp_Value)
 		itoa(frac_num, buffer);
 		Rolling_Average_ASCII[2] = buffer[0];
 
+		whole_num = (int)Current_Temperature;
+		frac_num = (int)((Current_Temperature - whole_num) * 100); // multiply by 100 to get 2 decimal places
+		itoa(whole_num, buffer);
+		Current_Temperature_ASCII[0] = buffer[0];
+		Current_Temperature_ASCII[1] = buffer[1];
+		itoa(frac_num, buffer);
+		Current_Temperature_ASCII[2] = buffer[0];
+
 		// TODO create snprintf like below with average.
 		// snprintf(Temperature_Write_Out, 100, "%c%c.%c\n%c%c%c\n%c%c.%c\n", Temperature_Array[Sample_Number].Upper_Bit[0], Temperature_Array[Sample_Number].Upper_Bit[1], Temperature_Array[Sample_Number].Lower_Bit, Temperature_Array[Sample_Number].Kelvin[0], Temperature_Array[Sample_Number].Kelvin[1], Temperature_Array[Sample_Number].Kelvin[2], Rolling_Average_ASCII[0], Rolling_Average_ASCII[1], Rolling_Average_ASCII[2]);
 		snprintf(Temperature_Write_Out, 100, "%c%c.%c\n%c%c%c\n", Rolling_Average_ASCII[0], Rolling_Average_ASCII[1], Rolling_Average_ASCII[2], Temperature_Array[Sample_Number].Kelvin[0], Temperature_Array[Sample_Number].Kelvin[1], Temperature_Array[Sample_Number].Kelvin[2]);
+
+		/* Removing as this is no longer the time to write out the message :)
 		Send_I2C_Message(0x048, Temperature_Write_Out_ptr, 8);
-		snprintf(UART_Message_Global, 100, "Current Average Temperature %c%c.%c %cC and %c%c%c %cK. \n\r", Rolling_Average_ASCII[0], Rolling_Average_ASCII[1], Rolling_Average_ASCII[2], 248, Temperature_Array[Sample_Number].Kelvin[0], Temperature_Array[Sample_Number].Kelvin[1], Temperature_Array[Sample_Number].Kelvin[2], 248);
+		snprintf(UART_Message_Global, 100, "Current Average Temperature %c%c.%cC and %c%c%cK. \n\r", Rolling_Average_ASCII[0], Rolling_Average_ASCII[1], Rolling_Average_ASCII[2], Temperature_Array[Sample_Number].Kelvin[0], Temperature_Array[Sample_Number].Kelvin[1], Temperature_Array[Sample_Number].Kelvin[2]);
 		Send_UART_Message(49);
+		*/
 		// Increment sample number
 
-		Sample_Number = 0;
+		// Sample_Number = 0; <-- Don't need??
 	}
 	// Create string of values if samples has not reached the threshold without the average
 	// snprintf(Temperature_Write_Out, 100, "%c%c.%c%c%c%c\n", Temperature_Array[Sample_Number].Upper_Bit[0], Temperature_Array[Sample_Number].Upper_Bit[1], Temperature_Array[Sample_Number].Lower_Bit, Temperature_Array[Sample_Number].Kelvin[0], Temperature_Array[Sample_Number].Kelvin[1], Temperature_Array[Sample_Number].Kelvin[2]);
@@ -344,7 +619,7 @@ void Process_Temperature_Data(int New_Temp_Value)
 float Convert_to_Celsius(float V0)
 {
 	float Celsius = 0;
-	Celsius = -1481.6 + sqrt(2.1962e6 + ((1.8639 - V0) / (3.88e-6)));
+	Celsius = 4.5 + (-1481.6 + sqrt(2.1962e6 + ((1.8639 - V0) / (3.88e-6))));
 	return (Celsius);
 }
 
@@ -370,20 +645,79 @@ Interrupt Service Routines
 
 // I2C Transmit intterupt vector
 // Used to send data out the master
-//TODO UPDATE CODE TO RECIEVE DATA FROM RTC AND TEMP_SENSOR
+// TODO UPDATE CODE TO RECIEVE DATA FROM RTC AND TEMP_SENSOR
+
 #pragma vector = EUSCI_B1_VECTOR
 __interrupt void EUSCI_B1_I2C_ISR(void)
 {
-	// Send I2C Message
-	UCB1TXBUF = I2C_Message_Global[I2C_Message_Counter]; // Send the next byte in the I2C_Message_Global string
-	I2C_Message_Counter++;								 // Increase the message position counter
+	switch (UCB1IV)
+	{
+	case 0x16:
+		if (Read_Slave_Address == LM92)
+		{
+			I2C_Message_Global_Receive[I2C_Message_In_Counter] = UCB1RXBUF; // IT PUTS THE DATA IN THE BASKET
+			I2C_Message_In_Counter++;
+		}
+		if (Read_Slave_Address == RTC)
+		{
+			Current_Time_BCD[I2C_Message_In_Counter] = UCB1RXBUF; // receive data
+			I2C_Message_In_Counter++;
+		}
+		break;
+
+	case 0x18:
+		UCB1TXBUF = I2C_Message_Global[I2C_Message_Counter]; // Send the next byte in the I2C_Message_Global string
+		I2C_Message_Counter++;								 // Increase the message position counter
+		break;
+	default:
+		break;
+	}
 }
 
 // Keypad interrupt vector
 #pragma vector = PORT1_VECTOR
 __interrupt void ISR_Keypad_Pressed(void)
 {
-	
+	Temp_In[0] = P1IN;
+	P6OUT |= BIT6;
+	// Switch to P1 as output, and P2 as input
+
+	// Set P1.0->P1.3 as Outputs
+	P1DIR |= 0xFF;
+	P1REN |= 0xFF;
+	P1OUT |= 0xFF;
+	// Set P2.0->P2.3 as Outputs
+	P2DIR &= ~0xFF;
+	P2REN |= 0xFF;
+	P2OUT &= ~0xFF;
+
+	P2IN &= ~0xFF;
+	P1IFG &= ~0xFF; // Clear P1 IFG
+
+	Temp_In[1] = P2IN;
+	// Rotate the upper nibble
+	Temp_In[0] = Temp_In[0] << 4;
+
+	Key_In = Temp_In[0] | Temp_In[1];
+
+	// Switch to P1 as output, and P2 as input
+
+	// Set P1.0->P1.3 as inputs
+	P1DIR &= ~0xFF;
+	P1REN |= 0xFF;
+	P1OUT &= ~0xFF;
+	// Set P2.0->P2.3 as Outputs
+	P2DIR |= 0xFF;
+	P2REN &= 0xFF;
+	P2OUT |= 0xFF;
+
+	// Enable P1.0->P1.3 Interrupts
+	P1IN &= ~0xFF;
+	P1IFG &= ~0xFF;
+	P2IFG &= ~0xFF; // Clear P2 IFG
+
+	P1IE |= 0xFF;
+	New_Input = 1;
 }
 
 // Analog to Digital interrupt triggered by Timer A1
@@ -397,8 +731,16 @@ __interrupt void Sample_Timer(void)
 	TB0CCTL0 &= ~CCIFG;
 	// read LM19 sensor and convert to temperature
 	ADCCTL0 |= ADCENC | ADCSC;
-	while (ADCCTL1 & ADCBUSY);
+	while (ADCCTL1 & ADCBUSY)
+		;
 	Raw_Temp = ADCMEM0;
 	Fresh_Data = 1;
+}
 
+#pragma vector = TIMER1_B0_VECTOR
+__interrupt void RTC_Timer(void)
+{
+	TB0CCTL0 &= ~CCIFG;
+	Get_Time = 1;
+	Peltier_On++;
 }

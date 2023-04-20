@@ -9,69 +9,70 @@ Setup: (Using the DS3231 RTC from Analog Devices)
     1. RTC is running on I2C bus, with address 0x068 this is hard coded to the RTC
     2. RTC requires setup of the timer which is register 08h
 */
+#define RTC 0x068
 
 
-void Set_Time(void);
+void Set_Time(char* RTC_Message);
 void Read_Time(void);
+extern First_Set_Time;
+extern Data_In;
+extern char Set_Time_ptr;
+extern Read_In_Length;
+extern *Get_Time_ptr;
+extern char I2C_Message_Global[];
+extern int I2C_Message_Counter;
+extern int I2C_Message_In_Counter;
+extern int Read_Time_True;
+extern int Read_Slave_Address;
 
-
-void Set_Time(void){
+void Set_Time(char* RTC_Message){
     //Send I2C Message to the RTC to set the time
     //
 
-    //Need to put I2C in transmit mode...
-    //Need to set buffer length to 7
-    //Should be able to use Send_I2C_Message
-    Send_I2C_Message(RTC, Set_Time_ptr, 7);
+        //Need to put I2C in transmit mode...
+        //Need to set buffer length to 7
+        //Should be able to use Send_I2C_Message
+        int i;
+        for(i = 0; i < 8; i++){
+            I2C_Message_Global[i] = RTC_Message[i];
+        }
+        UCB1TBCNT = 8; //Set the buffer size to the size of the input char* I2C_Message ie how many bytes to send via I2C
+
+        UCB1I2CSA = RTC;  //Set the slave address in the module equal to the input slave address
+        UCB1CTLW0 |= UCTR;       //Put into transmit mode
+        UCB1CTLW0 |= UCTXSTT;   //Generate the start condition
+        First_Set_Time = 1;
 }
+
 
 void Read_Time(void){
     //Recieve the current time from the RTC....
-    //Put into recieve mode
-    UCB1CTLW0 &= ~UCTR;
-    UCB1CTLW0 |= UCRXIE0; //Enable recieve interrupt
-    UCB1CTLW0 |= UCTXSTT; //Put into recieve mode
-    Data_In = 6;          //Reading in 6 bytes of data
-    
-}
 
-#pragma vector = EUSCI_B1_VECTOR
-__interrupt void EUSCI_B1_I2C_ISR(void){
+    //Get the current time  from the RTC via I2C
+    //Send Address and starting register
+    Read_Slave_Address = RTC;
+    I2C_Message_Counter = 0;
+    I2C_Message_Global[0] = 0;
+    UCB1TBCNT = 1;                                          //Number of bytes to write out
+    UCB1TXBUF = 0;
+    UCB1I2CSA = RTC;
+    UCB1CTLW0 |= UCTR;                                      // Tx mode
+    UCB1CTLW0 |= UCTXSTT;                                   // generate start condition
 
-    switch(UCB1IV){
-     case 0x16:                 //ID 16: RXIFG0 -->Recieve, used for both temperature and RTC. 
-                                //Expecting 7 bytes of data from the RTC
-                                //Expecting 1 byte from the LM92 
-         for(temp_pos = 0; temp_pos < Data_In; temp_pos++){
-        // Data_In[temp_pos] = UCB1RXBUF;   // receive data
-        //Need to do some conversions here to move the imported data into the struct. Using an array I think is the best option
-            Current_Time_BCD[j] = UCB1RXBUF;    //Read into the BCD array for temporary storage
-         int j;
-         for (j = 0; j < 500; ++j) {
-            //delay
-        }
-         }
-         break;
-    //This whole case needs to be updated for the transmission with variable buffer size and etc.
-     case 0x18:                 // ID 18: TXIFG0 --> Transmit
-         if(first_Set_Time == 0 && Data_Cnt <= 8){
-                 UCB1TBCNT = 8;  //# of bytes in Set_Time
+    while((UCB1IFG & UCSTPIFG) == 0);                       //wait for stop flag
+    int i;
+    for(i = 0; i < 20000; i++){
 
-                 UCB1TXBUF = Set_Time[Data_Cnt];
-
-                 if(Data_Cnt == 7){
-                     first_Set_Time = 1;
-                 }
-                 else{
-                     Data_Cnt++;
-                 }
-
-         }
-         else{
-                UCB1TXBUF = 0x03;      //send register address to start
-         }
-         break;
-     default:
-         break;
     }
+    I2C_Message_In_Counter = 0;
+    UCB1TBCNT = 7;                                          //Number of bytes to read in
+    UCB1IFG &= ~UCSTPIFG;                                   // clear flag
+    UCB1CTLW0 &= ~UCTR;                                     // put into RX mode
+    UCB1CTLW0 |= UCTXSTT;                                   // generate START condition
+
+    while((UCB1IFG & UCSTPIFG) == 0);                       //wait for stop flag
+        UCB1IFG &= ~UCSTPIFG;                               // clear flag
 }
+
+
+
