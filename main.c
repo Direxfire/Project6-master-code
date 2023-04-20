@@ -93,7 +93,7 @@ void Read_Time(void);
 char Set_Time_Arr[] = {0x00, Starting_Seconds, Starting_Minutes, Starting_Hours, Starting_Day, Starting_Date, Starting_Month, Starting_Year}; // This will be removed later this is the start time for the RTC
 char *Set_Time_ptr = Set_Time_Arr;
 char I2C_Message_Global[max_I2C_Length]; // Create an empty "string" to hold the final message as it is being sent out I2C
-
+char* I2C_Message_Global_ptr = I2C_Message_Global;
 int Read_Time_True = 0;
 
 int Get_Time = 0;
@@ -126,6 +126,10 @@ struct Time Current_Time;
 #define Date Current_Time.date
 #define Month Current_Time.month
 #define Year Current_Time.year
+
+char Seconds_ASCII;
+char Minutes_ASCII;
+char Hours_ASCII;
 
 int Current_Time_BCD[7]; // Create an array which contains structs
 //^This allows for the indexing of the Current_Time struct with an integer
@@ -195,6 +199,7 @@ char *Unlocked_ASCII_ptr = Unlocked_ASCII;
 int Unlocked_Input;
 char Mode_Select;
 int Key_In = 0;
+int Device_Online = 1;
 /*
 
 Peltier Controls Section
@@ -228,6 +233,7 @@ Written 03/27/23 Last Revision 03/27/23 by Drew.
 */
 int main(void)
 {
+
 	WDTCTL = WDTPW | WDTHOLD; // stop watchdog timer
 
 	// Using some simple IO to debug
@@ -275,14 +281,15 @@ int main(void)
 		5. Add additional I2C Slave communication as needed.
 	*/
 
-	// Test function to send the initial RTC setup values.......
-	void Set_Time(char *RTC_Message); // Yeah this literally just calls the Send_I2C_Message function now...
-	unsigned Delay;
-
-	Set_Time(Set_Time_ptr);
-
+	//Set_Time(Set_Time_ptr);
+	while(1){
+	Device_Online = 1;
 	int i;
-
+	snprintf(UART_Message_Global, 100, "\033[H\033[J");
+	Send_UART_Message(10);
+	for(i = 0; i < 1000; i++)
+	{
+	}
 	snprintf(UART_Message_Global, 100, "System Starting \e[?25l");
 	Send_UART_Message(21);
 	for (i = 0; i < 20000; i++)
@@ -392,6 +399,8 @@ int main(void)
 	// snprintf(UART_Message_Global, 100, "The Time is now: [20%d-%d-%dT%d:%d:%d]\n\r", Year, Month, Date, Hours, Minutes, Seconds);
 	// Send_UART_Message(38);
 
+	//Call get N value here...... This is the next step now that the char modes are working.
+
 	while (1)
 	{
 		if (New_Input == 1)
@@ -400,26 +409,35 @@ int main(void)
 			Mode_Select = Decode_Input(Key_In);
 			New_Input = 0;
 		}
+        snprintf(I2C_Message_Global,100, "%c", Mode_Select);
+        Send_I2C_Message(LED, I2C_Message_Global_ptr, 1);
 		switch (Mode_Select)
 		{
 		case 'A':
 			// Heat the device
-			P5DIR &= ~BIT2; // Set led dir out Cool
-			P5DIR |= BIT3;	// Set led dir out Heat
+			P5OUT &= ~BIT2; // Clear Cooling LED
+            P6OUT &= ~BIT6; // Clear led temp match mode
+			P5OUT |= BIT3;	// Set Heating LED
+
 			break;
 		case 'B':
 			// Cool the device
-			P5DIR &= ~BIT3; // Set led dir out Heat
-			P5DIR |= BIT2;	// Set led dir out Cool
+			P5OUT &= ~BIT3; // Clear Heating LED
+            P6OUT &= ~BIT6; // Clear led temp match mode
+			P5OUT |= BIT2;	// Set Cooling LED
 			break;
 		case 'C':
 			// Match ambient
-			Peltier_PID(Current_Temperature, 0);
+			//Peltier_PID(Current_Temperature, 0);
+		    P6OUT |= BIT6;
+		    //Leave the Heating and Cooling LED to the Peltier_PID controller
 			break;
 		case 'D':
 			// Turn off device
-			P5DIR &= ~BIT3;
-			P5DIR &= ~BIT2;
+			P5OUT &= ~BIT3;
+			P6OUT &= ~BIT6;
+			P5OUT &= ~BIT2;
+			//Send UART Message something like "Device Off."
 			break;
 		default:
 			break;
@@ -433,13 +451,17 @@ int main(void)
 		if (Get_Time == 1)
 		{
 			Get_Time = 0;
-			Read_Time();
-			bcd_decimal();
+			//Read_Time();
+			//bcd_decimal();
 			if (Rolling_Average_Unlocked == 1)
 			{
 				Current_Temperature = Read_Plant_Temperature();
 				for (i = 0; i < 2000; i++)
 					;
+
+				itoa(Hours, Hours_ASCII);
+				itoa(Minutes, Minutes_ASCII);
+				itoa(Seconds, Seconds_ASCII);
 
 				// Note these time stamps follow the ISO 8601 standard format of UTC time then + or - the hours to the current time zone. For mountain time this is 6.
 				snprintf(UART_Message_Global, 100, "The current temperature is: %c%c.%c%cC. ", Rolling_Average_ASCII[0], Rolling_Average_ASCII[1], Rolling_Average_ASCII[2], 176);
@@ -454,6 +476,11 @@ int main(void)
 				Send_UART_Message(47);
 				for (i = 0; i < 10000; i++)
 					;
+				//Following message format: Ambient temperature 0, Ambient temperature 1, Ambient temperature 2, Peltier Temperature 0, Peltier Temperature 1, Peltier Temperature 0, Hours, Minutes, Seconds
+				//To account for decimal rollover the system sends 18 bytes? I think this will work??
+				snprintf(I2C_Message_Global,100, "%c%c%c%c%c%c%c%c%c",Current_Temperature_ASCII[0], Current_Temperature_ASCII[1], Current_Temperature_ASCII[2], Rolling_Average_ASCII[0], Rolling_Average_ASCII[1], Rolling_Average_ASCII[3], Hours_ASCII, Minutes_ASCII, Seconds_ASCII);
+		        Send_I2C_Message(LCD, I2C_Message_Global_ptr, 18);
+
 			}
 			else
 			{
@@ -478,6 +505,7 @@ int main(void)
 			// Send_UART_Message(21);
 		}
 	}
+    }
 }
 
 void bcd_decimal(void)
@@ -591,7 +619,7 @@ void Process_Temperature_Data(int New_Temp_Value)
 
 		// TODO create snprintf like below with average.
 		// snprintf(Temperature_Write_Out, 100, "%c%c.%c\n%c%c%c\n%c%c.%c\n", Temperature_Array[Sample_Number].Upper_Bit[0], Temperature_Array[Sample_Number].Upper_Bit[1], Temperature_Array[Sample_Number].Lower_Bit, Temperature_Array[Sample_Number].Kelvin[0], Temperature_Array[Sample_Number].Kelvin[1], Temperature_Array[Sample_Number].Kelvin[2], Rolling_Average_ASCII[0], Rolling_Average_ASCII[1], Rolling_Average_ASCII[2]);
-		snprintf(Temperature_Write_Out, 100, "%c%c.%c\n%c%c%c\n", Rolling_Average_ASCII[0], Rolling_Average_ASCII[1], Rolling_Average_ASCII[2], Temperature_Array[Sample_Number].Kelvin[0], Temperature_Array[Sample_Number].Kelvin[1], Temperature_Array[Sample_Number].Kelvin[2]);
+		//snprintf(Temperature_Write_Out, 100, "%c%c.%c\n%c%c%c\n", Rolling_Average_ASCII[0], Rolling_Average_ASCII[1], Rolling_Average_ASCII[2], Temperature_Array[Sample_Number].Kelvin[0], Temperature_Array[Sample_Number].Kelvin[1], Temperature_Array[Sample_Number].Kelvin[2]);
 
 		/* Removing as this is no longer the time to write out the message :)
 		Send_I2C_Message(0x048, Temperature_Write_Out_ptr, 8);
@@ -678,7 +706,7 @@ __interrupt void EUSCI_B1_I2C_ISR(void)
 __interrupt void ISR_Keypad_Pressed(void)
 {
 	Temp_In[0] = P1IN;
-	P6OUT |= BIT6;
+	//P6OUT |= BIT6;
 	// Switch to P1 as output, and P2 as input
 
 	// Set P1.0->P1.3 as Outputs
