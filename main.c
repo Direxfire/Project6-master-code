@@ -82,10 +82,10 @@ void Read_Time(void);
 
 // Constants for the RTC
 #define Starting_Seconds 0x00
-#define Starting_Minutes 0x32
+#define Starting_Minutes 0x19
 #define Starting_Hours 0x06
-#define Starting_Day 0x01 // This is 1-7 for the days of the week
-#define Starting_Date 0x17
+#define Starting_Day 0x04 // This is 1-7 for the days of the week
+#define Starting_Date 0x20
 #define Starting_Month 0x04
 #define Starting_Year 0x23
 
@@ -281,7 +281,6 @@ int main(void)
 		5. Add additional I2C Slave communication as needed.
 	*/
 
-	//Set_Time(Set_Time_ptr);
 	while(1){
 	Device_Online = 1;
 	int i;
@@ -301,6 +300,7 @@ int main(void)
 	for (i = 0; i < 20000; i++)
 	{
 	}
+    Set_Time(Set_Time_ptr);
 	for (i = 0; i < 20000; i++)
 	{
 	}
@@ -428,7 +428,7 @@ int main(void)
 			break;
 		case 'C':
 			// Match ambient
-			//Peltier_PID(Current_Temperature, 0);
+			Peltier_PID(Current_Temperature, Rolling_Average);
 		    P6OUT |= BIT6;
 		    //Leave the Heating and Cooling LED to the Peltier_PID controller
 			break;
@@ -451,8 +451,8 @@ int main(void)
 		if (Get_Time == 1)
 		{
 			Get_Time = 0;
-			//Read_Time();
-			//bcd_decimal();
+			Read_Time();
+			bcd_decimal();
 			if (Rolling_Average_Unlocked == 1)
 			{
 				Current_Temperature = Read_Plant_Temperature();
@@ -646,7 +646,7 @@ void Process_Temperature_Data(int New_Temp_Value)
 float Convert_to_Celsius(float V0)
 {
 	float Celsius = 0;
-	Celsius = 4.5 + (-1481.6 + sqrt(2.1962e6 + ((1.8639 - V0) / (3.88e-6))));
+	Celsius = 5.3 + (-1481.6 + sqrt(2.1962e6 + ((1.8639 - V0) / (3.88e-6))));
 	return (Celsius);
 }
 
